@@ -1,10 +1,11 @@
 ﻿using FloatingStatusWindowLibrary;
 using HomeStatusWindow.Properties;
+using Microsoft.AspNetCore.SignalR.Client;
 using Newtonsoft.Json;
-using Quobject.SocketIoClientDotNet.Client;
 using System;
 using System.Text;
 using System.Threading.Tasks;
+using System.Timers;
 using System.Windows.Threading;
 
 namespace HomeStatusWindow
@@ -14,21 +15,30 @@ namespace HomeStatusWindow
         private readonly FloatingStatusWindow _floatingStatusWindow;
         private readonly Dispatcher _dispatcher;
 
-        private Socket _socket;
+        private HubConnection _hubConnection;
+        private DateTime _lastUpdate;
+        private Timer _reconnectTimer;
+
+        private readonly Status _lastStatus = new Status();
 
         internal WindowSource()
         {
             _dispatcher = Dispatcher.CurrentDispatcher;
 
             _floatingStatusWindow = new FloatingStatusWindow(this);
-            _floatingStatusWindow.SetText(Resources.Loading);
+            UpdateText(Resources.Loading);
 
-            Task.Factory.StartNew(Initialize);
+            // Initialize the connection
+            Task.Factory.StartNew(InitializeConnection);
         }
 
-        public void Dispose()
+        public async void Dispose()
         {
-            Terminate();
+            // Stop the reconnection timer (if any)
+            StopReconnectionTimer();
+
+            // Terminate the connection
+            await TerminateConnection();
 
             _floatingStatusWindow.Save();
             _floatingStatusWindow.Dispose();
@@ -48,11 +58,13 @@ namespace HomeStatusWindow
 
         public string Name => Resources.Name;
 
-        public bool HasSettingsMenu => false;
-        public bool HasRefreshMenu => false;
-        public bool HasAboutMenu => false;
-
         public System.Drawing.Icon Icon => Resources.ApplicationIcon;
+
+        public bool HasSettingsMenu => false;
+
+        public bool HasRefreshMenu => false;
+
+        public bool HasAboutMenu => false;
 
         public string WindowSettings
         {
@@ -64,64 +76,121 @@ namespace HomeStatusWindow
             }
         }
 
-        private readonly Status _fullStatus = new Status();
-
-        private void Initialize()
+        private void StartReconnectionTimer()
         {
-            // Create the socket
-            _socket = IO.Socket(Settings.Default.ServerAddress);
+            // Stop the current timer (if any)
+            StopReconnectionTimer();
 
-            // Setup for status events
-            _socket.On("status", UpdateText);
-
-            _socket.On(Socket.EVENT_CONNECT, () => _socket.Emit("getStatus"));
-            _socket.On(Socket.EVENT_DISCONNECT, () => SetText(Resources.Disconnected));
+            // Create and start the reconnection timer
+            _reconnectTimer = new Timer(Settings.Default.ReconnectTimerInterval.TotalMilliseconds);
+            _reconnectTimer.Elapsed += HandleReconnectTimerElapsed;
+            _reconnectTimer.Start();
         }
 
-        private void Terminate()
+        private void StopReconnectionTimer()
         {
-            _socket?.Disconnect();
+            // Get rid of the reconnection timer
+            _reconnectTimer?.Dispose();
+            _reconnectTimer = null;
         }
 
-        private void UpdateText(object data)
+        private void HandleReconnectTimerElapsed(object sender, ElapsedEventArgs e)
         {
-            var json = (string)data;
-
-            var status = JsonConvert.DeserializeObject<Status>(json);
-
-            if (status.Dryer.HasValue)
-                _fullStatus.Dryer = status.Dryer;
-
-            if (status.Washer.HasValue)
-                _fullStatus.Washer = status.Washer;
-
-            var text = GetText(_fullStatus);
-
-            SetText(text);
+            // See if we haven't heard from the server within the timeout and reconnect if needed
+            if (DateTime.Now - _lastUpdate >= Settings.Default.ReconnectTimeout)
+                InitializeConnection();
         }
 
-        private void SetText(string text)
-        {
-            // Update the window on the main thread
-            _dispatcher.Invoke(() => _floatingStatusWindow.SetText(text));
-        }
-
-        private static string GetText(Status status)
+        private void InitializeConnection()
         {
             try
             {
-                var output = new StringBuilder();
+                // Stop the reconnection timer (if any)
+                StopReconnectionTimer();
 
-                output.AppendFormat(Resources.DryerStatus, status.Dryer.GetValueOrDefault() ? Resources.On : Resources.Off);
-                output.AppendLine();
-                output.AppendFormat(Resources.WasherStatus, status.Washer.GetValueOrDefault() ? Resources.On : Resources.Off);
+                // Create the URI for the server
+                var serverUri = string.Format(Settings.Default.ServerUri, Settings.Default.ServerName, Settings.Default.ServerPort);
 
-                return output.ToString();
+                _hubConnection = new HubConnectionBuilder()
+                    .WithUrl(serverUri)
+                    .Build();
+
+                _hubConnection.Closed += error =>
+                {
+                    StartReconnectionTimer();
+
+                    return Task.CompletedTask;
+                };
+
+                _hubConnection.On<string>("LatestStatus", (message) =>
+                {
+                    try
+                    {
+                        var statusMessage = JsonConvert.DeserializeObject<StatusMessage>(message);
+
+                        switch (statusMessage?.Name)
+                        {
+                            case "washer":
+                                _lastStatus.Washer = statusMessage.Status;
+                                break;
+                            case "dryer":
+                                _lastStatus.Dryer = statusMessage.Status;
+                                break;
+                        }
+
+                        UpdateDisplay(_lastStatus);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                });
+
+                // Open the connection
+                _hubConnection.StartAsync().Wait();
+
+                _hubConnection.InvokeAsync("RequestLatestStatus").Wait();
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                return ex.Message;
+                UpdateText($"Connection error: {exception.Message}");
             }
+            finally
+            {
+                // Start the reconnection check timer
+                StartReconnectionTimer();
+            }
+        }
+
+        private async Task TerminateConnection()
+        {
+            // If the client doesn't exist or isn't open then there's nothing to do
+            if (_hubConnection == null || _hubConnection.State != HubConnectionState.Connected)
+                return;
+
+            // Close the connection
+            await _hubConnection.DisposeAsync();
+        }
+
+        private void UpdateDisplay(Status status)
+        {
+            // Last update was now
+            _lastUpdate = DateTime.Now;
+
+            // Create a string builder
+            var text = new StringBuilder();
+
+            text.AppendFormat(Resources.DryerStatus, status.Dryer ? Resources.On : Resources.Off);
+            text.AppendLine();
+            text.AppendFormat(Resources.WasherStatus, status.Washer ? Resources.On : Resources.Off);
+
+            // Set the text
+            UpdateText(text.ToString());
+        }
+
+        private void UpdateText(string text)
+        {
+            _dispatcher.InvokeAsync(() => _floatingStatusWindow.SetText(text));
         }
     }
 }

@@ -12,7 +12,7 @@ namespace HomeStatusWindow.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "14.0.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "17.3.0.0")]
     internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase {
         
         private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
@@ -47,15 +47,48 @@ namespace HomeStatusWindow.Properties {
             }
         }
         
-        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("http://chip")]
-        public string ServerAddress {
+        [global::System.Configuration.DefaultSettingValueAttribute("00:00:30")]
+        public global::System.TimeSpan ReconnectTimerInterval {
             get {
-                return ((string)(this["ServerAddress"]));
+                return ((global::System.TimeSpan)(this["ReconnectTimerInterval"]));
             }
-            set {
-                this["ServerAddress"] = value;
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("00:01:00")]
+        public global::System.TimeSpan ReconnectTimeout {
+            get {
+                return ((global::System.TimeSpan)(this["ReconnectTimeout"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("http://{0}:{1}/api/hub/device-status")]
+        public string ServerUri {
+            get {
+                return ((string)(this["ServerUri"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("172.23.10.3")]
+        public string ServerName {
+            get {
+                return ((string)(this["ServerName"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("80")]
+        public int ServerPort {
+            get {
+                return ((int)(this["ServerPort"]));
             }
         }
     }
